@@ -157,18 +157,30 @@ class AppGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Galaxy Checkout Fixer")
-        self.root.geometry("640x730")
-        self.root.minsize(580, 650)
         self.root.configure(bg=BG_COLOR)
+
+        self._configure_window_size()
 
         self.proxy = ProxyEngine(port=8888, log_callback=self.log_message)
         self.is_adb_active = False
+        self.is_busy = False
 
         self._get_local_ip()
+        self._setup_styles()
         self._build_ui()
-        self.check_adb_device()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.after(200, self.async_check_device)
+
+    def _configure_window_size(self):
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        win_w = min(560, max(480, screen_w - 60))
+        win_h = min(590, max(460, screen_h - 100))
+        pos_x = (screen_w - win_w) // 2
+        pos_y = max(15, (screen_h - win_h - 60) // 2)
+        self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        self.root.minsize(480, 450)
 
     def _get_local_ip(self):
         try:
@@ -179,103 +191,149 @@ class AppGUI:
         except:
             self.local_ip = "127.0.0.1"
 
-    def _build_ui(self):
-        header_frame = tk.Frame(self.root, bg=BG_COLOR, pady=16)
-        header_frame.pack(fill=tk.X, padx=20)
+    def _setup_styles(self):
+        style = ttk.Style()
+        style.theme_use("clam")
 
-        title = tk.Label(header_frame, text="Galaxy Checkout Fixer", font=("Segoe UI", 18, "bold"), fg=TEXT_COLOR, bg=BG_COLOR)
+        style.configure("TNotebook", background=BG_COLOR, borderwidth=0)
+        style.configure("TNotebook.Tab", background=CARD_BG, foreground=TEXT_MUTED, padding=[12, 6], font=("Segoe UI", 9, "bold"), borderwidth=0)
+        style.map("TNotebook.Tab",
+                  background=[("selected", CARD_BORDER), ("active", CARD_BG)],
+                  foreground=[("selected", TEXT_COLOR), ("active", TEXT_COLOR)])
+
+        style.configure("Horizontal.TProgressbar", background=ACCENT_BLUE, troughcolor=CARD_BG, borderwidth=0, thickness=4)
+
+    def _build_ui(self):
+        header_frame = tk.Frame(self.root, bg=BG_COLOR, padx=16, pady=10)
+        header_frame.pack(fill=tk.X)
+
+        title = tk.Label(header_frame, text="Galaxy Checkout Fixer", font=("Segoe UI", 16, "bold"), fg=TEXT_COLOR, bg=BG_COLOR)
         title.pack(anchor="w")
 
-        subtitle = tk.Label(header_frame, text="Solucione o erro de acesso não autorizado nas compras da Galaxy Store", font=("Segoe UI", 10), fg=ACCENT_BLUE, bg=BG_COLOR)
-        subtitle.pack(anchor="w", pady=(2, 0))
+        subtitle = tk.Label(header_frame, text="Correção do erro de checkout e acesso não autorizado na Galaxy Store", font=("Segoe UI", 9), fg=ACCENT_BLUE, bg=BG_COLOR)
+        subtitle.pack(anchor="w", pady=(1, 0))
 
-        dev_card = tk.Frame(self.root, bg=CARD_BG, highlightbackground=CARD_BORDER, highlightthickness=1, padx=16, pady=12)
-        dev_card.pack(fill=tk.X, padx=20, pady=6)
+        dev_card = tk.Frame(self.root, bg=CARD_BG, highlightbackground=CARD_BORDER, highlightthickness=1, padx=12, pady=8)
+        dev_card.pack(fill=tk.X, padx=16, pady=(0, 6))
 
-        dev_title = tk.Label(dev_card, text="Dispositivo USB / ADB Conectado:", font=("Segoe UI", 10, "bold"), fg=TEXT_COLOR, bg=CARD_BG)
+        dev_left = tk.Frame(dev_card, bg=CARD_BG)
+        dev_left.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        dev_title = tk.Label(dev_left, text="Dispositivo USB:", font=("Segoe UI", 9, "bold"), fg=TEXT_COLOR, bg=CARD_BG)
         dev_title.pack(anchor="w")
 
-        dev_subframe = tk.Frame(dev_card, bg=CARD_BG)
-        dev_subframe.pack(fill=tk.X, pady=(4, 0))
+        self.lbl_device = tk.Label(dev_left, text="Verificando...", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG)
+        self.lbl_device.pack(anchor="w")
 
-        self.lbl_device = tk.Label(dev_subframe, text="Verificando...", font=("Segoe UI", 10), fg=TEXT_MUTED, bg=CARD_BG)
-        self.lbl_device.pack(side=tk.LEFT)
+        dev_actions = tk.Frame(dev_card, bg=CARD_BG)
+        dev_actions.pack(side=tk.RIGHT)
 
-        btn_refresh = tk.Button(dev_subframe, text="↻ Atualizar", font=("Segoe UI", 9), fg=TEXT_COLOR, bg=CARD_BORDER, relief=tk.FLAT, command=self.check_adb_device, cursor="hand2")
-        btn_refresh.pack(side=tk.RIGHT)
+        self.btn_refresh = tk.Button(dev_actions, text="↻ Atualizar", font=("Segoe UI", 9), fg=TEXT_COLOR, bg=CARD_BORDER, relief=tk.FLAT, padx=8, pady=3, command=self.async_check_device, cursor="hand2")
+        self.btn_refresh.pack(side=tk.LEFT, padx=3)
+
+        self.btn_reboot = tk.Button(dev_actions, text="🔄 Reiniciar Celular", font=("Segoe UI", 9), fg="#FFFFFF", bg="#8B5CF6", activebackground="#7C3AED", relief=tk.FLAT, padx=8, pady=3, command=self.async_reboot_device, cursor="hand2")
+        self.btn_reboot.pack(side=tk.LEFT, padx=3)
 
         notebook_frame = tk.Frame(self.root, bg=BG_COLOR)
-        notebook_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+        notebook_frame.pack(fill=tk.X, padx=16, pady=2)
 
-        mode1_card = tk.Frame(notebook_frame, bg=CARD_BG, highlightbackground=CARD_BORDER, highlightthickness=1, padx=16, pady=14)
-        mode1_card.pack(fill=tk.X, pady=6)
+        self.notebook = ttk.Notebook(notebook_frame)
+        self.notebook.pack(fill=tk.X)
 
-        m1_title = tk.Label(mode1_card, text="1. Modo Rápido via USB", font=("Segoe UI", 11, "bold"), fg=TEXT_COLOR, bg=CARD_BG)
-        m1_title.pack(anchor="w")
+        tab1 = tk.Frame(self.notebook, bg=CARD_BG, padx=12, pady=10)
+        self.notebook.add(tab1, text="Modo Rápido USB")
 
-        m1_desc = tk.Label(mode1_card, text="Ativa a correção automaticamente no celular e desfaz as alterações ao terminar.", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG)
-        m1_desc.pack(anchor="w", pady=(2, 10))
+        m1_desc = tk.Label(tab1, text="Aplica a correção via cabo USB e remove as regras de proxy ao desativar.", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG)
+        m1_desc.pack(anchor="w", pady=(0, 8))
 
-        btn_box = tk.Frame(mode1_card, bg=CARD_BG)
-        btn_box.pack(fill=tk.X)
-
-        self.btn_toggle_adb = tk.Button(btn_box, text="▶ ATIVAR CORREÇÃO NO CELULAR", font=("Segoe UI", 10, "bold"), fg="#FFFFFF", bg=ACCENT_GREEN, activebackground=ACCENT_GREEN_HOVER, activeforeground="#FFFFFF", relief=tk.FLAT, pady=8, command=self.toggle_adb_fix, cursor="hand2")
+        self.btn_toggle_adb = tk.Button(tab1, text="▶ ATIVAR CORREÇÃO NO CELULAR", font=("Segoe UI", 10, "bold"), fg="#FFFFFF", bg=ACCENT_GREEN, activebackground=ACCENT_GREEN_HOVER, activeforeground="#FFFFFF", relief=tk.FLAT, pady=8, command=self.async_toggle_adb, cursor="hand2")
         self.btn_toggle_adb.pack(fill=tk.X)
 
-        mode2_card = tk.Frame(notebook_frame, bg=CARD_BG, highlightbackground=CARD_BORDER, highlightthickness=1, padx=16, pady=14)
-        mode2_card.pack(fill=tk.X, pady=6)
+        tab2 = tk.Frame(self.notebook, bg=CARD_BG, padx=12, pady=10)
+        self.notebook.add(tab2, text="Solução Permanente")
 
-        m2_title = tk.Label(mode2_card, text="2. Solução Permanente", font=("Segoe UI", 11, "bold"), fg=TEXT_COLOR, bg=CARD_BG)
-        m2_title.pack(anchor="w")
+        m2_desc = tk.Label(tab2, text="Configura o DNS Privado no Android para manter a correção no Wi-Fi e dados móveis.", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG)
+        m2_desc.pack(anchor="w", pady=(0, 6))
 
-        m2_desc = tk.Label(mode2_card, text="Grava o DNS Privado no Android para bloquear a Konduto no Wi-Fi e dados móveis.", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG)
-        m2_desc.pack(anchor="w", pady=(2, 8))
-
-        dns_box = tk.Frame(mode2_card, bg=CARD_BG)
+        dns_box = tk.Frame(tab2, bg=CARD_BG)
         dns_box.pack(fill=tk.X, pady=2)
 
         lbl_nextdns = tk.Label(dns_box, text="ID NextDNS:", font=("Segoe UI", 9, "bold"), fg=TEXT_COLOR, bg=CARD_BG)
         lbl_nextdns.pack(side=tk.LEFT)
 
-        self.ent_nextdns = tk.Entry(dns_box, font=("Segoe UI", 10), bg=ENTRY_BG, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, highlightthickness=1, highlightbackground=CARD_BORDER)
-        self.ent_nextdns.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+        self.ent_nextdns = tk.Entry(dns_box, font=("Segoe UI", 9), bg=ENTRY_BG, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, highlightthickness=1, highlightbackground=CARD_BORDER)
+        self.ent_nextdns.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
 
-        btn_open_nextdns = tk.Button(dns_box, text="Criar Perfil Grátis", font=("Segoe UI", 9), fg=ACCENT_BLUE, bg=CARD_BG, relief=tk.FLAT, command=lambda: webbrowser.open("https://nextdns.io"), cursor="hand2")
+        btn_open_nextdns = tk.Button(dns_box, text="Criar Perfil Grátis", font=("Segoe UI", 8), fg=ACCENT_BLUE, bg=CARD_BG, relief=tk.FLAT, command=lambda: webbrowser.open("https://nextdns.io"), cursor="hand2")
         btn_open_nextdns.pack(side=tk.RIGHT)
 
-        dns_actions = tk.Frame(mode2_card, bg=CARD_BG)
-        dns_actions.pack(fill=tk.X, pady=(10, 0))
+        dns_actions = tk.Frame(tab2, bg=CARD_BG)
+        dns_actions.pack(fill=tk.X, pady=(8, 0))
 
-        btn_apply_dns = tk.Button(dns_actions, text="Gravar no Celular", font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg=ACCENT_BLUE, relief=tk.FLAT, pady=6, command=self.apply_permanent_dns, cursor="hand2")
-        btn_apply_dns.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        self.btn_apply_dns = tk.Button(dns_actions, text="Gravar no Celular", font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg=ACCENT_BLUE, relief=tk.FLAT, pady=5, command=self.async_apply_dns, cursor="hand2")
+        self.btn_apply_dns.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
 
-        btn_reset_dns = tk.Button(dns_actions, text="Restaurar DNS Padrão", font=("Segoe UI", 9), fg=TEXT_COLOR, bg=CARD_BORDER, relief=tk.FLAT, pady=6, command=self.reset_permanent_dns, cursor="hand2")
-        btn_reset_dns.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+        self.btn_reset_dns = tk.Button(dns_actions, text="Restaurar DNS Padrão", font=("Segoe UI", 9), fg=TEXT_COLOR, bg=CARD_BORDER, relief=tk.FLAT, pady=5, command=self.async_reset_dns, cursor="hand2")
+        self.btn_reset_dns.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(3, 0))
 
-        mode3_card = tk.Frame(notebook_frame, bg=CARD_BG, highlightbackground=CARD_BORDER, highlightthickness=1, padx=16, pady=10)
-        mode3_card.pack(fill=tk.X, pady=6)
+        tab3 = tk.Frame(self.notebook, bg=CARD_BG, padx=12, pady=10)
+        self.notebook.add(tab3, text="Modo Wi-Fi")
 
-        m3_title = tk.Label(mode3_card, text="3. Modo Wi-Fi", font=("Segoe UI", 10, "bold"), fg=TEXT_COLOR, bg=CARD_BG)
-        m3_title.pack(anchor="w")
+        m3_desc = tk.Label(tab3, text=f"Para conexão sem cabo: configure Proxy Manual no Wi-Fi do celular em {self.local_ip}:{self.proxy.port} enquanto esta ferramenta estiver aberta.", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG, wraplength=480, justify="left")
+        m3_desc.pack(anchor="w")
 
-        info_wifi = f"Para uso sem cabo: configure Proxy Manual no Wi-Fi do celular apontando para {self.local_ip}:{self.proxy.port} enquanto este aplicativo estiver aberto."
-        m3_desc = tk.Label(mode3_card, text=info_wifi, font=("Segoe UI", 9), fg=TEXT_MUTED, bg=CARD_BG, wraplength=540, justify="left")
-        m3_desc.pack(anchor="w", pady=(2, 0))
+        status_bar_frame = tk.Frame(self.root, bg=BG_COLOR, padx=16, pady=4)
+        status_bar_frame.pack(fill=tk.X)
 
-        log_frame = tk.Frame(self.root, bg=BG_COLOR, padx=20, pady=4)
+        self.lbl_status = tk.Label(status_bar_frame, text="Pronto", font=("Segoe UI", 9), fg=TEXT_MUTED, bg=BG_COLOR)
+        self.lbl_status.pack(side=tk.LEFT)
+
+        self.progressbar = ttk.Progressbar(status_bar_frame, mode="indeterminate", style="Horizontal.TProgressbar")
+
+        log_frame = tk.Frame(self.root, bg=BG_COLOR, padx=16, pady=2)
         log_frame.pack(fill=tk.BOTH, expand=True)
 
-        lbl_log = tk.Label(log_frame, text="Log de Atividades:", font=("Segoe UI", 9, "bold"), fg=TEXT_MUTED, bg=CARD_BG)
+        lbl_log = tk.Label(log_frame, text="Terminal de Atividades:", font=("Segoe UI", 9, "bold"), fg=TEXT_MUTED, bg=BG_COLOR)
         lbl_log.pack(anchor="w")
 
-        self.txt_log = tk.Text(log_frame, bg=CARD_BG, fg=TEXT_COLOR, font=("Consolas", 9), height=7, relief=tk.FLAT, highlightthickness=1, highlightbackground=CARD_BORDER)
-        self.txt_log.pack(fill=tk.BOTH, expand=True, pady=(2, 10))
+        log_subframe = tk.Frame(log_frame, bg=CARD_BG, highlightbackground=CARD_BORDER, highlightthickness=1)
+        log_subframe.pack(fill=tk.BOTH, expand=True, pady=(2, 8))
+
+        log_scroll = tk.Scrollbar(log_subframe)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.txt_log = tk.Text(log_subframe, bg=CARD_BG, fg=TEXT_COLOR, font=("Consolas", 9), relief=tk.FLAT, yscrollcommand=log_scroll.set)
+        self.txt_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scroll.config(command=self.txt_log.yview)
 
     def log_message(self, msg):
         def _append():
             self.txt_log.insert(tk.END, msg + "\n")
             self.txt_log.see(tk.END)
         self.root.after(0, _append)
+
+    def set_loading(self, active, message="Processando..."):
+        def _update():
+            self.is_busy = active
+            if active:
+                self.progressbar.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
+                self.progressbar.start(12)
+                self.lbl_status.config(text=message, fg=ACCENT_BLUE)
+                self.btn_refresh.config(state=tk.DISABLED)
+                self.btn_reboot.config(state=tk.DISABLED)
+                self.btn_toggle_adb.config(state=tk.DISABLED)
+                self.btn_apply_dns.config(state=tk.DISABLED)
+                self.btn_reset_dns.config(state=tk.DISABLED)
+            else:
+                self.progressbar.stop()
+                self.progressbar.pack_forget()
+                self.lbl_status.config(text=message, fg=TEXT_MUTED)
+                self.btn_refresh.config(state=tk.NORMAL)
+                self.btn_reboot.config(state=tk.NORMAL)
+                self.btn_toggle_adb.config(state=tk.NORMAL)
+                self.btn_apply_dns.config(state=tk.NORMAL)
+                self.btn_reset_dns.config(state=tk.NORMAL)
+        self.root.after(0, _update)
 
     def run_adb(self, cmd_args):
         try:
@@ -285,76 +343,149 @@ class AppGUI:
         except Exception as e:
             return False, str(e)
 
-    def check_adb_device(self):
-        ok, out = self.run_adb(["devices"])
-        if ok:
-            lines = [l for l in out.splitlines()[1:] if l.strip() and "device" in l]
-            if lines:
-                _, brand = self.run_adb(["shell", "getprop", "ro.product.brand"])
-                _, model = self.run_adb(["shell", "getprop", "ro.product.model"])
-                b = brand.strip().capitalize() if brand else "Samsung"
-                m = model.strip() if model else "Aparelho"
-                info = f"✓ {b} {m} conectado via USB"
-                self.lbl_device.config(text=info, fg=ACCENT_GREEN)
-                return True
-        self.lbl_device.config(text="Nenhum aparelho detectado via USB", fg=ACCENT_RED_LIGHT)
-        return False
+    def async_check_device(self):
+        if self.is_busy:
+            return
+        def _work():
+            self.set_loading(True, "Buscando dispositivos...")
+            ok, out = self.run_adb(["devices"])
+            device_found = False
+            device_label = "Nenhum aparelho detectado via USB"
+            label_color = ACCENT_RED_LIGHT
 
-    def toggle_adb_fix(self):
-        if not self.is_adb_active:
-            if not self.check_adb_device():
-                messagebox.showwarning("Aviso", "Conecte o celular com a Depuração USB ativada ou utilize o modo Wi-Fi.")
-                return
+            if ok:
+                lines = [l for l in out.splitlines()[1:] if l.strip()]
+                for l in lines:
+                    if "device" in l and "unauthorized" not in l:
+                        _, brand = self.run_adb(["shell", "getprop", "ro.product.brand"])
+                        _, model = self.run_adb(["shell", "getprop", "ro.product.model"])
+                        b = brand.strip().capitalize() if brand else "Samsung"
+                        m = model.strip() if model else "Galaxy"
+                        device_label = f"✓ {b} {m} conectado"
+                        label_color = ACCENT_GREEN
+                        device_found = True
+                        break
+                    elif "unauthorized" in l:
+                        device_label = "⚠ Desbloqueie a tela do celular para autorizar"
+                        label_color = "#E3B341"
+                        break
 
-            self.proxy.start()
-            self.run_adb(["reverse", f"tcp:{self.proxy.port}", f"tcp:{self.proxy.port}"])
-            self.run_adb(["shell", "settings", "put", "global", "http_proxy", f"127.0.0.1:{self.proxy.port}"])
+            def _done():
+                self.lbl_device.config(text=device_label, fg=label_color)
+                self.set_loading(False, "Pronto")
+            self.root.after(0, _done)
 
-            self.is_adb_active = True
-            self.btn_toggle_adb.config(text="⏹ DESATIVAR CORREÇÃO NO CELULAR", bg=ACCENT_RED, activebackground=ACCENT_RED_HOVER)
-            self.log_message("[ADB] Correção ativada! Abra o jogo e faça sua compra normalmente.")
-        else:
-            self._cleanup_adb()
-            self.proxy.stop()
-            self.is_adb_active = False
-            self.btn_toggle_adb.config(text="▶ ATIVAR CORREÇÃO NO CELULAR", bg=ACCENT_GREEN, activebackground=ACCENT_GREEN_HOVER)
-            self.log_message("[ADB] Correção desativada. Rede restaurada ao normal.")
+        threading.Thread(target=_work, daemon=True).start()
+
+    def async_toggle_adb(self):
+        if self.is_busy:
+            return
+        def _work():
+            if not self.is_adb_active:
+                self.set_loading(True, "Ativando correção no celular...")
+                ok, out = self.run_adb(["devices"])
+                if not any("device" in l and "unauthorized" not in l for l in out.splitlines()[1:] if l.strip()):
+                    self.set_loading(False, "Falha na conexão USB")
+                    messagebox.showwarning("Aviso", "Conecte o celular com a Depuração USB ativada ou use o modo Wi-Fi.")
+                    return
+
+                self.proxy.start()
+                self.run_adb(["reverse", f"tcp:{self.proxy.port}", f"tcp:{self.proxy.port}"])
+                self.run_adb(["shell", "settings", "put", "global", "http_proxy", f"127.0.0.1:{self.proxy.port}"])
+
+                self.is_adb_active = True
+                def _update_ui():
+                    self.btn_toggle_adb.config(text="⏹ DESATIVAR CORREÇÃO NO CELULAR", bg=ACCENT_RED, activebackground=ACCENT_RED_HOVER)
+                    self.log_message("[ADB] Correção ativada com sucesso. Abra o jogo e conclua sua compra.")
+                    self.set_loading(False, "Correção ativa")
+                self.root.after(0, _update_ui)
+            else:
+                self.set_loading(True, "Desativando correção e restaurando rede...")
+                self._cleanup_adb()
+                self.proxy.stop()
+                self.is_adb_active = False
+                def _update_ui():
+                    self.btn_toggle_adb.config(text="▶ ATIVAR CORREÇÃO NO CELULAR", bg=ACCENT_GREEN, activebackground=ACCENT_GREEN_HOVER)
+                    self.log_message("[ADB] Correção desativada. Rede restaurada ao padrão.")
+                    self.set_loading(False, "Pronto")
+                self.root.after(0, _update_ui)
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def _cleanup_adb(self):
         self.run_adb(["shell", "settings", "delete", "global", "http_proxy"])
         self.run_adb(["shell", "settings", "delete", "global", "global_http_proxy_host"])
         self.run_adb(["shell", "settings", "delete", "global", "global_http_proxy_port"])
+        self.run_adb(["shell", "settings", "delete", "global", "global_http_proxy_exclusion_list"])
         self.run_adb(["reverse", "--remove", f"tcp:{self.proxy.port}"])
 
-    def apply_permanent_dns(self):
+    def async_apply_dns(self):
+        if self.is_busy:
+            return
         dns_id = self.ent_nextdns.get().strip()
         if not dns_id:
-            messagebox.showwarning("Atenção", "Digite o ID do seu perfil NextDNS, exemplo: 12ab34.")
+            messagebox.showwarning("Atenção", "Digite o ID do seu perfil NextDNS, por exemplo: 12ab34.")
             return
 
-        if not self.check_adb_device():
-            messagebox.showwarning("Aviso", "Conecte o celular via USB para aplicar a configuração definitiva.")
+        def _work():
+            self.set_loading(True, "Gravando DNS Privado no celular...")
+            hostname = f"{dns_id}.dns.nextdns.io"
+            self.run_adb(["shell", "settings", "put", "global", "private_dns_mode", "hostname"])
+            ok, _ = self.run_adb(["shell", "settings", "put", "global", "private_dns_specifier", hostname])
+
+            def _done():
+                if ok:
+                    self.log_message(f"[DNS] Gravado com sucesso no celular: {hostname}")
+                    self.set_loading(False, "DNS gravado")
+                    messagebox.showinfo("Sucesso", f"O DNS Privado foi gravado no aparelho:\n{hostname}\n\nLembre-se de adicionar 'i.konduto.com' na Denylist do NextDNS.")
+                else:
+                    self.set_loading(False, "Erro ao gravar DNS")
+                    messagebox.showerror("Erro", "Não foi possível gravar a configuração de DNS via USB.")
+            self.root.after(0, _done)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def async_reset_dns(self):
+        if self.is_busy:
+            return
+        def _work():
+            self.set_loading(True, "Restaurando DNS padrão...")
+            self.run_adb(["shell", "settings", "put", "global", "private_dns_mode", "off"])
+            self.run_adb(["shell", "settings", "delete", "global", "private_dns_specifier"])
+
+            def _done():
+                self.log_message("[DNS] Configuração de DNS Privado restaurada ao padrão do Android.")
+                self.set_loading(False, "DNS restaurado")
+                messagebox.showinfo("Restaurado", "O DNS Privado do aparelho foi restaurado ao padrão do sistema.")
+            self.root.after(0, _done)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def async_reboot_device(self):
+        if self.is_busy:
+            return
+        if not messagebox.askyesno("Reiniciar Aparelho", "Deseja reiniciar o celular agora para zerar a memória de rede e reiniciar os aplicativos?"):
             return
 
-        hostname = f"{dns_id}.dns.nextdns.io"
-        self.run_adb(["shell", "settings", "put", "global", "private_dns_mode", "hostname"])
-        ok, _ = self.run_adb(["shell", "settings", "put", "global", "private_dns_specifier", hostname])
+        def _work():
+            self.set_loading(True, "Enviando comando de reinicialização...")
+            self.log_message("[Aparelho] Enviando comando para reiniciar o celular...")
+            self._cleanup_adb()
+            ok, out = self.run_adb(["reboot"])
 
-        if ok:
-            self.log_message(f"[Permanente] DNS Privado gravado com sucesso: {hostname}")
-            messagebox.showinfo("Sucesso", f"O DNS Privado foi gravado no aparelho:\n{hostname}\n\nLembre-se de adicionar 'i.konduto.com' na Denylist do seu NextDNS. A correção agora é permanente!")
-        else:
-            messagebox.showerror("Erro", "Não foi possível gravar a configuração de DNS via ADB.")
+            def _done():
+                if ok:
+                    self.log_message("[Aparelho] Comando enviado. O celular está reiniciando.")
+                    self.lbl_device.config(text="Aparelho reiniciando...", fg=ACCENT_BLUE)
+                    self.set_loading(False, "Aparelho reiniciando")
+                    messagebox.showinfo("Reiniciando", "O celular está reiniciando. Aguarde o aparelho ligar para concluir a restauração completa.")
+                else:
+                    self.log_message(f"[Aparelho] Falha ao enviar reboot: {out}")
+                    self.set_loading(False, "Falha ao reiniciar")
+                    messagebox.showwarning("Aviso", "Não foi possível reiniciar o aparelho via USB. Verifique a conexão.")
+            self.root.after(0, _done)
 
-    def reset_permanent_dns(self):
-        if not self.check_adb_device():
-            messagebox.showwarning("Aviso", "Conecte o celular via USB para restaurar o DNS.")
-            return
-
-        self.run_adb(["shell", "settings", "put", "global", "private_dns_mode", "hostname"])
-        self.run_adb(["shell", "settings", "put", "global", "private_dns_specifier", "dns.google"])
-        self.log_message("[Permanente] DNS Privado restaurado para o padrão.")
-        messagebox.showinfo("Restaurado", "O DNS Privado do aparelho foi restaurado para o padrão.")
+        threading.Thread(target=_work, daemon=True).start()
 
     def on_close(self):
         if self.is_adb_active:
