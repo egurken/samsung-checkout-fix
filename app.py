@@ -6,6 +6,8 @@ import subprocess
 import webbrowser
 import os
 import sys
+import signal
+import atexit
 
 BG_COLOR = "#0D1117"
 CARD_BG = "#161B22"
@@ -54,6 +56,8 @@ class ProxyEngine:
         self.server_socket = None
         self.is_running = False
         self.thread = None
+        self._active_sockets = set()
+        self._lock = threading.Lock()
 
     def log(self, msg):
         self.log_callback(msg)
@@ -66,6 +70,7 @@ class ProxyEngine:
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind(("0.0.0.0", self.port))
         self.server_socket.listen(100)
+        self.server_socket.settimeout(1.0)
         self.log(f"[Proxy] Servidor iniciado na porta {self.port}.")
 
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -75,13 +80,25 @@ class ProxyEngine:
         while self.is_running:
             try:
                 client_sock, client_addr = self.server_socket.accept()
-                threading.Thread(target=self._handle_client, args=(client_sock,), daemon=True).start()
-            except:
+            except socket.timeout:
+                continue
+            except Exception:
                 break
 
+            with self._lock:
+                if not self.is_running:
+                    try: client_sock.close()
+                    except: pass
+                    break
+                self._active_sockets.add(client_sock)
+
+            threading.Thread(target=self._handle_client, args=(client_sock,), daemon=True).start()
+
     def _handle_client(self, client_sock):
+        remote_sock = None
         try:
             req = b""
+            client_sock.settimeout(10.0)
             while b"\r\n\r\n" not in req and len(req) < 8192:
                 chunk = client_sock.recv(4096)
                 if not chunk:
@@ -89,14 +106,12 @@ class ProxyEngine:
                 req += chunk
 
             if not req:
-                client_sock.close()
                 return
 
             lines = req.split(b"\r\n")
             first_line = lines[0].decode('latin1', errors='ignore')
             parts = first_line.split()
             if len(parts) < 2:
-                client_sock.close()
                 return
 
             method, target = parts[0], parts[1]
@@ -109,15 +124,16 @@ class ProxyEngine:
                 if any(b in host.lower() for b in BLOCKED_DOMAINS):
                     self.log(f"[BLOQUEADO] {host} interceptado com sucesso! Checkout liberado.")
                     client_sock.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                    client_sock.close()
                     return
 
                 try:
                     remote_sock = socket.create_connection((host, port), timeout=10)
+                    with self._lock:
+                        if self.is_running:
+                            self._active_sockets.add(remote_sock)
                     client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 except Exception:
                     client_sock.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-                    client_sock.close()
                     return
 
                 def pipe(src, dst):
@@ -135,22 +151,46 @@ class ProxyEngine:
                         try: dst.close()
                         except: pass
 
-                threading.Thread(target=pipe, args=(client_sock, remote_sock), daemon=True).start()
-                threading.Thread(target=pipe, args=(remote_sock, client_sock), daemon=True).start()
-            else:
-                client_sock.close()
+                t1 = threading.Thread(target=pipe, args=(client_sock, remote_sock), daemon=True)
+                t2 = threading.Thread(target=pipe, args=(remote_sock, client_sock), daemon=True)
+                t1.start()
+                t2.start()
+                t1.join()
+                t2.join()
         except:
+            pass
+        finally:
+            with self._lock:
+                self._active_sockets.discard(client_sock)
+                if remote_sock:
+                    self._active_sockets.discard(remote_sock)
             try: client_sock.close()
             except: pass
+            if remote_sock:
+                try: remote_sock.close()
+                except: pass
 
     def stop(self):
+        if not self.is_running and not self.server_socket:
+            return
         self.is_running = False
+
+        # Fecha conexões ativas imediatamente
+        with self._lock:
+            for s in list(self._active_sockets):
+                try: s.shutdown(socket.SHUT_RDWR)
+                except: pass
+                try: s.close()
+                except: pass
+            self._active_sockets.clear()
+
+        # Fecha socket ouvinte
         if self.server_socket:
-            try:
-                self.server_socket.close()
-            except:
-                pass
-        self.log("[Proxy] Servidor parado.")
+            try: self.server_socket.close()
+            except: pass
+            self.server_socket = None
+
+        self.log("[Proxy] Servidor encerrado.")
 
 
 class AppGUI:
@@ -164,6 +204,8 @@ class AppGUI:
         self.proxy = ProxyEngine(port=8888, log_callback=self.log_message)
         self.is_adb_active = False
         self.is_busy = False
+        self._is_closing = False
+        atexit.register(self.on_close)
 
         self._get_local_ip()
         self._setup_styles()
@@ -418,6 +460,7 @@ class AppGUI:
         self.run_adb(["shell", "settings", "delete", "global", "global_http_proxy_port"])
         self.run_adb(["shell", "settings", "delete", "global", "global_http_proxy_exclusion_list"])
         self.run_adb(["reverse", "--remove", f"tcp:{self.proxy.port}"])
+        self.run_adb(["reverse", "--remove-all"])
 
     def async_apply_dns(self):
         if self.is_busy:
@@ -488,16 +531,52 @@ class AppGUI:
         threading.Thread(target=_work, daemon=True).start()
 
     def on_close(self):
-        if self.is_adb_active:
-            self._cleanup_adb()
+        if getattr(self, "_is_closing", False):
+            return
+        self._is_closing = True
+
+        try:
+            if self.is_adb_active:
+                self.log_message("[Encerramento] Restaurando configurações de rede no celular...")
+                self._cleanup_adb()
+        except:
+            pass
+
+        try:
+            self.log_message("[Encerramento] Encerrando servidor Proxy Python...")
             self.proxy.stop()
-        self.root.destroy()
+        except:
+            pass
+
+        try:
+            self.run_adb(["reverse", "--remove-all"])
+        except:
+            pass
+
+        try:
+            self.root.destroy()
+        except:
+            pass
+
+        # Garante o encerramento imediato do processo e de todas as threads do servidor
+        os._exit(0)
 
 
 def main():
     root = tk.Tk()
     app = AppGUI(root)
+
+    def signal_handler(sig, frame):
+        app.on_close()
+
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    except:
+        pass
+
     root.mainloop()
 
 if __name__ == "__main__":
     main()
+

@@ -22,3 +22,7 @@ ENV/
 *.swo
 
 Enviar_Para_GitHub.bat
+
+# Dumps & Screenshots
+*.png
+*.xml

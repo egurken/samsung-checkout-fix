@@ -96,6 +96,7 @@ Baixe o executável [`GalaxyCheckoutFix.exe`](./GalaxyCheckoutFix.exe). Ele já 
 * **Indicador de carregamento:** Barra de progresso animada e avisos em tempo real para cada operação.
 * **Terminal espaçoso:** Área de atividades ampla com barra de rolagem dedicada.
 * **Botão Reiniciar Celular:** Reinicie o celular diretamente pelo aplicativo via USB para zerar a memória de rede e restaurar o estado padrão dos navegadores.
+* **Encerramento limpo e seguro:** Ao fechar o aplicativo no "X" ou fechar a janela, o servidor proxy local Python, os sockets de rede e todas as threads em segundo plano são finalizados imediatamente, restaurando a rede do celular e liberando a porta 8888 sem deixar processos rodando em segundo plano.
 
 #### Passo a passo via USB:
 1. Conecte o aparelho Samsung ao computador pelo cabo USB com a Depuração USB ativada.
