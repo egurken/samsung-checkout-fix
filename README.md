@@ -85,16 +85,13 @@ Se preferir usar um aplicativo de gerenciamento de rede no Android:
 
 ---
 
-### Método 4: Usando o Galaxy Checkout Fixer para Windows
+### Método 4: Usando o aoo que disponibilizei para Windows
 
 Para quem prefere uma ferramenta pronta no computador com ativação em um clique via cabo USB:
 
 Baixe o executável [`GalaxyCheckoutFix.exe`](./GalaxyCheckoutFix.exe). Ele já vem com Python e utilitários ADB embutidos, sem necessidade de instalar dependências.
 
 #### Recursos do Aplicativo:
-* **Dimensões adaptadas:** Janela compacta e responsiva que respeita a barra de tarefas do Windows.
-* **Indicador de carregamento:** Barra de progresso animada e avisos em tempo real para cada operação.
-* **Terminal espaçoso:** Área de atividades ampla com barra de rolagem dedicada.
 * **Botão Reiniciar Celular:** Reinicie o celular diretamente pelo aplicativo via USB para zerar a memória de rede e restaurar o estado padrão dos navegadores.
 * **Encerramento limpo e seguro:** Ao fechar o aplicativo no "X" ou fechar a janela, o servidor proxy local Python, os sockets de rede e todas as threads em segundo plano são finalizados imediatamente, restaurando a rede do celular e liberando a porta 8888 sem deixar processos rodando em segundo plano.
 
@@ -103,7 +100,7 @@ Baixe o executável [`GalaxyCheckoutFix.exe`](./GalaxyCheckoutFix.exe). Ele já 
 2. Abra o executável. O aplicativo reconhecerá o modelo do aparelho automaticamente.
 3. Clique em **ATIVAR CORREÇÃO NO CELULAR**.
 4. Abra o jogo no celular e conclua sua compra normalmente.
-5. Ao finalizar, clique em **DESATIVAR CORREÇÃO NO CELULAR**. Se desejar zerar os caches residuais dos navegadores, utilize o botão **Reiniciar Celular**.
+5. Ao finalizar, clique em **DESATIVAR CORREÇÃO NO CELULAR**. Se desejar zerar os caches residuais dos navegadores, utilize o botão **Reiniciar Celular** **(RECOMENDADO)**.
 
 ---
 
